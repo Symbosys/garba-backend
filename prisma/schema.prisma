@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  PARTNER
+  ORGANIZER
+  SUPER_ADMIN
+}
+
+enum AccountStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum StorageProvider {
+  CLOUDINARY
+  AWS_S3
+  AZURE_BLOB
+  LOCAL
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+}
+
+model User {
+  id              String        @id @default(uuid()) @db.Uuid
+  email           String        @unique @db.VarChar(254)
+  phone           String        @unique @db.VarChar(20)
+  passwordHash    String        @map("password_hash") @db.VarChar(100)
+  name            String        @db.VarChar(120)
+  age             Int           @db.SmallInt
+  addressLine     String        @map("address_line") @db.VarChar(250)
+  city            String        @db.VarChar(100)
+  state           String        @db.VarChar(100)
+  gender          Gender
+  role            UserRole
+  status          AccountStatus @default(PENDING)
+  rejectionReason String?       @map("rejection_reason") @db.VarChar(500)
+  approvedAt      DateTime?     @map("approved_at") @db.Timestamptz(3)
+  approvedById    String?       @map("approved_by_id") @db.Uuid
+  approvedBy      User?         @relation("UserApprovals", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedUsers   User[]        @relation("UserApprovals")
+  tokenVersion    Int           @default(0) @map("token_version")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  photos              UserPhoto[]
+  registrationPayment RegistrationPayment?
+  reviewedPayments    RegistrationPayment[] @relation("PaymentReviewer")
+  events               Event[]
+
+  @@index([role, status])
+  @@index([city, state, role, status])
+  @@map("users")
+}
+
+model UserPhoto {
+  id        String          @id @default(uuid()) @db.Uuid
+  userId    String          @map("user_id") @db.Uuid
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url       String          @db.Text
+  publicId  String          @map("public_id") @db.Text
+  provider  StorageProvider
+  mimeType  String          @map("mime_type") @db.VarChar(100)
+  bytes     Int
+  sortOrder Int             @default(0) @map("sort_order")
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([userId, sortOrder])
+  @@map("user_photos")
+}
+
+model RegistrationPayment {
+  id              String          @id @default(uuid()) @db.Uuid
+  userId          String          @unique @map("user_id") @db.Uuid
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountPaise     Int             @map("amount_paise")
+  currency        String          @default("INR") @db.Char(3)
+  status          PaymentStatus   @default(PENDING)
+  proofUrl         String          @map("proof_url") @db.Text
+  proofPublicId    String          @map("proof_public_id") @db.Text
+  proofProvider    StorageProvider @map("proof_provider")
+  proofMimeType    String          @map("proof_mime_type") @db.VarChar(100)
+  proofBytes       Int             @map("proof_bytes")
+  reviewedAt       DateTime?       @map("reviewed_at") @db.Timestamptz(3)
+  reviewedById     String?         @map("reviewed_by_id") @db.Uuid
+  reviewedBy       User?           @relation("PaymentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  rejectionReason String?         @map("rejection_reason") @db.VarChar(500)
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([status, createdAt])
+  @@map("registration_payments")
+}
+
+model Event {
+  id           String      @id @default(uuid()) @db.Uuid
+  organizerId  String      @map("organizer_id") @db.Uuid
+  organizer    User        @relation(fields: [organizerId], references: [id], onDelete: Restrict)
+  title        String      @db.VarChar(160)
+  slug         String      @unique @db.VarChar(190)
+  description  String      @db.Text
+  venueName    String      @map("venue_name") @db.VarChar(160)
+  addressLine  String      @map("address_line") @db.VarChar(250)
+  city         String      @db.VarChar(100)
+  state        String      @db.VarChar(100)
+  postalCode   String?     @map("postal_code") @db.VarChar(20)
+  latitude     Decimal     @db.Decimal(9, 6)
+  longitude    Decimal     @db.Decimal(9, 6)
+  startsAt     DateTime    @map("starts_at") @db.Timestamptz(3)
+  endsAt       DateTime    @map("ends_at") @db.Timestamptz(3)
+  entryFeePaise Int        @map("entry_fee_paise")
+  currency     String      @default("INR") @db.Char(3)
+  capacity     Int?
+  contactEmail String?     @map("contact_email") @db.VarChar(254)
+  contactPhone String?     @map("contact_phone") @db.VarChar(20)
+  status       EventStatus @default(DRAFT)
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt    DateTime?   @map("deleted_at") @db.Timestamptz(3)
+
+  images EventImage[]
+
+  @@index([status, startsAt])
+  @@index([city, state, status, startsAt])
+  @@index([organizerId, deletedAt, createdAt])
+  @@map("events")
+}
+
+model EventImage {
+  id        String          @id @default(uuid()) @db.Uuid
+  eventId   String          @map("event_id") @db.Uuid
+  event     Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  url       String          @db.Text
+  publicId  String          @map("public_id") @db.Text
+  provider  StorageProvider
+  mimeType  String          @map("mime_type") @db.VarChar(100)
+  bytes     Int
+  sortOrder Int             @default(0) @map("sort_order")
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([eventId, sortOrder])
+  @@map("event_images")
+}
