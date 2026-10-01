@@ -2,7 +2,42 @@ import { z } from "zod";
 
 const optionalText = (max: number) => z.string().trim().max(max).optional().transform((v) => v || undefined);
 
-const eventFields = {
+const preprocessSlots = (val: unknown) => {
+  if (typeof val === "string") {
+    try {
+      return JSON.parse(val);
+    } catch {
+      return val;
+    }
+  }
+  return val;
+};
+
+export const slotInputSchema = z.object({
+  id: z.string().uuid().optional(),
+  title: optionalText(120),
+  slotDate: z.coerce.date(),
+  startTime: z.coerce.date(),
+  endTime: z.coerce.date(),
+  entryFee: z.coerce.number().int().min(0).max(100_000_000).default(0),
+  currency: z.string().trim().length(3).default("INR"),
+  capacity: z.preprocess((v) => (v === "" || v === undefined ? undefined : Number(v)), z.number().int().positive().max(10_000_000).optional()),
+}).strict().refine((val) => val.endTime > val.startTime, {
+  message: "endTime must be after startTime",
+  path: ["endTime"],
+});
+
+export const slotUpdateSchema = z.object({
+  title: optionalText(120),
+  slotDate: z.coerce.date().optional(),
+  startTime: z.coerce.date().optional(),
+  endTime: z.coerce.date().optional(),
+  entryFee: z.coerce.number().int().min(0).max(100_000_000).optional(),
+  currency: z.string().trim().length(3).optional(),
+  capacity: z.preprocess((v) => (v === "" || v === undefined ? undefined : Number(v)), z.number().int().positive().max(10_000_000).optional()),
+}).strict();
+
+const eventBaseFields = {
   title: z.string().trim().min(3).max(160),
   description: z.string().trim().min(10).max(10_000),
   venueName: z.string().trim().min(2).max(160),
@@ -12,19 +47,22 @@ const eventFields = {
   postalCode: optionalText(20),
   latitude: z.coerce.number().min(-90).max(90),
   longitude: z.coerce.number().min(-180).max(180),
-  startsAt: z.coerce.date(),
-  endsAt: z.coerce.date(),
-  entryFeePaise: z.coerce.number().int().min(0).max(100_000_000),
-  capacity: z.preprocess((v) => v === "" || v === undefined ? undefined : Number(v), z.number().int().positive().max(10_000_000).optional()),
-  contactEmail: z.preprocess((v) => v === "" || v === undefined ? undefined : v, z.email().max(254).optional()),
+  capacity: z.preprocess((v) => (v === "" || v === undefined ? undefined : Number(v)), z.number().int().positive().max(10_000_000).optional()),
+  contactEmail: z.preprocess((v) => (v === "" || v === undefined ? undefined : v), z.email().max(254).optional()),
   contactPhone: optionalText(20),
   status: z.enum(["DRAFT", "PUBLISHED", "CANCELLED"]),
 };
 
-export const eventSchema = z.object({ ...eventFields, status: eventFields.status.default("DRAFT") }).strict()
-  .refine((value) => value.endsAt > value.startsAt, { message: "endsAt must be after startsAt", path: ["endsAt"] });
+export const eventSchema = z.object({
+  ...eventBaseFields,
+  status: eventBaseFields.status.default("DRAFT"),
+  slots: z.preprocess(preprocessSlots, z.array(slotInputSchema).min(1, "At least one event slot is required")),
+}).strict();
 
-export const eventUpdateSchema = z.object(eventFields).partial().strict();
+export const eventUpdateSchema = z.object({
+  ...eventBaseFields,
+  slots: z.preprocess(preprocessSlots, z.array(slotInputSchema).min(1).optional()),
+}).partial().strict();
 
 const booleanParam = z.preprocess((val) => {
   if (typeof val === "boolean") return val;
@@ -44,6 +82,8 @@ export const eventQuerySchema = z.object({
   status: z.enum(["PUBLISHED", "DRAFT", "CANCELLED", "ALL"]).optional(),
   startsFrom: z.string().trim().optional(),
   startsBefore: z.string().trim().optional(),
+  minFee: z.coerce.number().int().min(0).optional(),
+  maxFee: z.coerce.number().int().min(0).optional(),
   minFeePaise: z.coerce.number().int().min(0).optional(),
   maxFeePaise: z.coerce.number().int().min(0).optional(),
   isFree: booleanParam,
@@ -51,4 +91,6 @@ export const eventQuerySchema = z.object({
 }).strict();
 
 export type EventQueryInput = z.infer<typeof eventQuerySchema>;
+export type SlotInput = z.infer<typeof slotInputSchema>;
+
 

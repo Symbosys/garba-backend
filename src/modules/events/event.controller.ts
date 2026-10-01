@@ -7,10 +7,11 @@ import { statusCode } from "../../types/types.js";
 import { normalizePhone, parsePage } from "../../utils/normalization.util.js";
 import { cleanupUploads, uploadImages } from "../../utils/upload.util.js";
 import { ErrorResponse, SuccessResponse } from "../../utils/response.util.js";
-import { eventQuerySchema, eventSchema, eventUpdateSchema } from "./event.schema.js";
+import { eventQuerySchema, eventSchema, eventUpdateSchema, slotInputSchema, slotUpdateSchema } from "./event.schema.js";
 
 const eventInclude = {
   images: { orderBy: { sortOrder: "asc" as const }, select: { id: true, url: true, sortOrder: true } },
+  slots: { orderBy: [{ slotDate: "asc" as const }, { startTime: "asc" as const }] },
   organizer: {
     select: {
       id: true,
@@ -38,6 +39,25 @@ export const listEvents = asyncHandler(async (req: Request, res: Response) => {
     ? new Date(query.startsBefore)
     : undefined;
 
+  const minFee = query.minFee ?? (query.minFeePaise !== undefined ? Math.round(query.minFeePaise / 100) : undefined);
+  const maxFee = query.maxFee ?? (query.maxFeePaise !== undefined ? Math.round(query.maxFeePaise / 100) : undefined);
+
+  const slotFilters: Record<string, unknown> = {};
+  if (startsFromDate || startsBeforeDate) {
+    slotFilters.startTime = {
+      ...(startsFromDate ? { gte: startsFromDate } : {}),
+      ...(startsBeforeDate ? { lte: startsBeforeDate } : {}),
+    };
+  }
+  if (query.isFree === true) {
+    slotFilters.entryFee = 0;
+  } else if (minFee !== undefined || maxFee !== undefined) {
+    slotFilters.entryFee = {
+      ...(minFee !== undefined ? { gte: minFee } : {}),
+      ...(maxFee !== undefined ? { lte: maxFee } : {}),
+    };
+  }
+
   const where = {
     deletedAt: null,
     status: (query.status && query.status !== "ALL" ? query.status : "PUBLISHED") as any,
@@ -53,43 +73,20 @@ export const listEvents = asyncHandler(async (req: Request, res: Response) => {
       : {}),
     ...(query.city ? { city: { equals: query.city, mode: "insensitive" as const } } : {}),
     ...(query.state ? { state: { equals: query.state, mode: "insensitive" as const } } : {}),
-    ...(startsFromDate || startsBeforeDate
-      ? {
-          startsAt: {
-            ...(startsFromDate ? { gte: startsFromDate } : {}),
-            ...(startsBeforeDate ? { lte: startsBeforeDate } : {}),
-          },
-        }
-      : {}),
-    ...(query.isFree === true
-      ? { entryFeePaise: 0 }
-      : query.minFeePaise !== undefined || query.maxFeePaise !== undefined
-      ? {
-          entryFeePaise: {
-            ...(query.minFeePaise !== undefined ? { gte: query.minFeePaise } : {}),
-            ...(query.maxFeePaise !== undefined ? { lte: query.maxFeePaise } : {}),
-          },
-        }
-      : {}),
+    ...(Object.keys(slotFilters).length > 0 ? { slots: { some: slotFilters } } : {}),
   };
 
-  let orderBy: any = { startsAt: "asc" };
+  let orderBy: any = { createdAt: "desc" };
   switch (query.sortBy) {
     case "newest":
       orderBy = { createdAt: "desc" };
-      break;
-    case "fee_asc":
-      orderBy = { entryFeePaise: "asc" };
-      break;
-    case "fee_desc":
-      orderBy = { entryFeePaise: "desc" };
       break;
     case "title_asc":
       orderBy = { title: "asc" };
       break;
     case "upcoming":
     default:
-      orderBy = { startsAt: "asc" };
+      orderBy = { createdAt: "desc" };
       break;
   }
 
@@ -116,8 +113,8 @@ export const listEvents = asyncHandler(async (req: Request, res: Response) => {
       city: query.city || null,
       status: query.status || "PUBLISHED",
       isFree: query.isFree ?? null,
-      minFeePaise: query.minFeePaise ?? null,
-      maxFeePaise: query.maxFeePaise ?? null,
+      minFee: minFee ?? null,
+      maxFee: maxFee ?? null,
       sortBy: query.sortBy,
     },
   });
@@ -125,7 +122,15 @@ export const listEvents = asyncHandler(async (req: Request, res: Response) => {
 
 export const getEvent = asyncHandler(async (req: Request, res: Response) => {
   const key = String(req.params.eventIdOrSlug);
-  const event = await prisma.event.findFirst({ where: { OR: UUID_PATTERN.test(key) ? [{ id: key }, { slug: key }] : [{ slug: key }], status: "PUBLISHED", deletedAt: null, organizer: { status: "APPROVED" } }, include: eventInclude });
+  const event = await prisma.event.findFirst({
+    where: {
+      OR: UUID_PATTERN.test(key) ? [{ id: key }, { slug: key }] : [{ slug: key }],
+      status: "PUBLISHED",
+      deletedAt: null,
+      organizer: { status: "APPROVED" },
+    },
+    include: eventInclude,
+  });
   if (!event) throw new ErrorResponse("Event not found", statusCode.Not_Found);
   return SuccessResponse(res, "Event", event);
 });
@@ -153,23 +158,106 @@ export const createEvent = asyncHandler(async (req: Request, res: Response) => {
   if (images.length < 1) throw new ErrorResponse("At least one event image is required", statusCode.Bad_Request);
   const uploads = await uploadImages(images, "event-images");
   try {
+    const { slots, ...eventData } = input;
     const event = await prisma.event.create({
-      data: { ...input, slug: slugify(input.title), organizerId: req.auth!.userId, images: { create: uploads.map((image, index) => ({ url: image.secureUrl, publicId: image.publicId, provider: image.provider, mimeType: images[index]!.mimetype, bytes: image.bytes, sortOrder: index })) } },
+      data: {
+        ...eventData,
+        slug: slugify(input.title),
+        organizerId: req.auth!.userId,
+        images: {
+          create: uploads.map((image, index) => ({
+            url: image.secureUrl,
+            publicId: image.publicId,
+            provider: image.provider,
+            mimeType: images[index]!.mimetype,
+            bytes: image.bytes,
+            sortOrder: index,
+          })),
+        },
+        slots: {
+          create: slots.map((slot) => ({
+            title: slot.title,
+            slotDate: slot.slotDate,
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            entryFee: slot.entryFee,
+            currency: slot.currency,
+            capacity: slot.capacity,
+          })),
+        },
+      },
       include: eventInclude,
     });
     return SuccessResponse(res, "Event created", event, statusCode.Created);
-  } catch (error) { await cleanupUploads(uploads); throw error; }
+  } catch (error) {
+    await cleanupUploads(uploads);
+    throw error;
+  }
 });
 
 export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
   const input = eventUpdateSchema.parse(req.body);
   if (input.contactPhone) input.contactPhone = normalizePhone(input.contactPhone);
-  const current = await prisma.event.findFirst({ where: { id: String(req.params.eventId), organizerId: req.auth!.userId, deletedAt: null }, select: { startsAt: true, endsAt: true } });
+  const eventId = String(req.params.eventId);
+  const current = await prisma.event.findFirst({ where: { id: eventId, organizerId: req.auth!.userId, deletedAt: null } });
   if (!current) throw new ErrorResponse("Event not found", statusCode.Not_Found);
-  const startsAt = input.startsAt ?? current.startsAt;
-  const endsAt = input.endsAt ?? current.endsAt;
-  if (endsAt <= startsAt) throw new ErrorResponse("endsAt must be after startsAt", statusCode.Bad_Request);
-  const updated = await prisma.event.update({ where: { id: String(req.params.eventId), organizerId: req.auth!.userId }, data: input, include: eventInclude });
+
+  const { slots, ...eventData } = input;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    if (slots !== undefined) {
+      const existingSlots = await tx.eventSlot.findMany({
+        where: { eventId },
+        select: { id: true },
+      });
+      const existingIds = new Set(existingSlots.map((s) => s.id));
+      const providedIds = new Set(slots.filter((s) => s.id && existingIds.has(s.id)).map((s) => s.id!));
+
+      // Delete omitted slots
+      const toDelete = existingSlots.filter((s) => !providedIds.has(s.id)).map((s) => s.id);
+      if (toDelete.length > 0) {
+        await tx.eventSlot.deleteMany({ where: { id: { in: toDelete } } });
+      }
+
+      // Update existing & insert new slots
+      for (const slot of slots) {
+        if (slot.id && existingIds.has(slot.id)) {
+          await tx.eventSlot.update({
+            where: { id: slot.id },
+            data: {
+              title: slot.title,
+              slotDate: slot.slotDate,
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+              entryFee: slot.entryFee,
+              currency: slot.currency,
+              capacity: slot.capacity,
+            },
+          });
+        } else {
+          await tx.eventSlot.create({
+            data: {
+              eventId,
+              title: slot.title,
+              slotDate: slot.slotDate,
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+              entryFee: slot.entryFee,
+              currency: slot.currency,
+              capacity: slot.capacity,
+            },
+          });
+        }
+      }
+    }
+
+    return tx.event.update({
+      where: { id: eventId, organizerId: req.auth!.userId },
+      data: eventData,
+      include: eventInclude,
+    });
+  });
+
   return SuccessResponse(res, "Event updated", updated);
 });
 
@@ -200,3 +288,58 @@ export const deleteEventImage = asyncHandler(async (req: Request, res: Response)
   await storageService.delete(image.publicId);
   return res.status(statusCode.No_Content).send();
 });
+
+export const addEventSlot = asyncHandler(async (req: Request, res: Response) => {
+  const eventId = String(req.params.eventId);
+  const event = await prisma.event.findFirst({ where: { id: eventId, organizerId: req.auth!.userId, deletedAt: null }, select: { id: true } });
+  if (!event) throw new ErrorResponse("Event not found", statusCode.Not_Found);
+  const input = slotInputSchema.parse(req.body);
+  const slot = await prisma.eventSlot.create({
+    data: {
+      eventId,
+      title: input.title,
+      slotDate: input.slotDate,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      entryFee: input.entryFee,
+      currency: input.currency,
+      capacity: input.capacity,
+    },
+  });
+  return SuccessResponse(res, "Event slot added", slot, statusCode.Created);
+});
+
+export const updateEventSlot = asyncHandler(async (req: Request, res: Response) => {
+  const eventId = String(req.params.eventId);
+  const slotId = String(req.params.slotId);
+  const slot = await prisma.eventSlot.findFirst({
+    where: { id: slotId, eventId, event: { organizerId: req.auth!.userId, deletedAt: null } },
+  });
+  if (!slot) throw new ErrorResponse("Event slot not found", statusCode.Not_Found);
+  const input = slotUpdateSchema.parse(req.body);
+  const startTime = input.startTime ?? slot.startTime;
+  const endTime = input.endTime ?? slot.endTime;
+  if (endTime <= startTime) throw new ErrorResponse("endTime must be after startTime", statusCode.Bad_Request);
+
+  const updated = await prisma.eventSlot.update({
+    where: { id: slotId },
+    data: input,
+  });
+  return SuccessResponse(res, "Event slot updated", updated);
+});
+
+export const deleteEventSlot = asyncHandler(async (req: Request, res: Response) => {
+  const eventId = String(req.params.eventId);
+  const slotId = String(req.params.slotId);
+  const slot = await prisma.eventSlot.findFirst({
+    where: { id: slotId, eventId, event: { organizerId: req.auth!.userId, deletedAt: null } },
+    select: { id: true },
+  });
+  if (!slot) throw new ErrorResponse("Event slot not found", statusCode.Not_Found);
+  const totalSlots = await prisma.eventSlot.count({ where: { eventId } });
+  if (totalSlots <= 1) throw new ErrorResponse("An event must have at least one slot", statusCode.Bad_Request);
+
+  await prisma.eventSlot.delete({ where: { id: slotId } });
+  return res.status(statusCode.No_Content).send();
+});
+

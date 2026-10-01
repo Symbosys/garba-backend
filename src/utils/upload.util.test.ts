@@ -30,4 +30,31 @@ describe("safe image uploads", () => {
     await expect(uploadImages([file(png), file(png)], "test")).rejects.toThrow("cloud failure");
     expect(deleted).toEqual(["first"]);
   });
+
+  test("compresses images to strictly <= 100 KB regardless of input size", async () => {
+    // Generate a large 2000x2000 raw image
+    const largePng = await import("sharp").then((s) =>
+      s.default({
+        create: {
+          width: 2000,
+          height: 2000,
+          channels: 3,
+          background: { r: 255, g: 100, b: 50 },
+        },
+      })
+        .png()
+        .toBuffer()
+    );
+
+    let uploadedSize = 0;
+    storageService.upload = (async (storageFile: any) => {
+      uploadedSize = storageFile.size;
+      return { url: "u", secureUrl: "u", publicId: "p1", provider: "CLOUDINARY", bytes: storageFile.size, format: "jpg" };
+    }) as typeof storageService.upload;
+
+    await uploadImages([file(largePng)], "test");
+    expect(uploadedSize).toBeGreaterThan(0);
+    expect(uploadedSize).toBeLessThanOrEqual(100 * 1024);
+  });
 });
+

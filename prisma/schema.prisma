@@ -72,7 +72,7 @@ model User {
   photos              UserPhoto[]
   registrationPayment RegistrationPayment?
   reviewedPayments    RegistrationPayment[] @relation("PaymentReviewer")
-  events               Event[]
+  events              Event[]
 
   @@index([role, status])
   @@index([city, state, role, status])
@@ -102,17 +102,17 @@ model RegistrationPayment {
   amountPaise     Int             @map("amount_paise")
   currency        String          @default("INR") @db.Char(3)
   status          PaymentStatus   @default(PENDING)
-  proofUrl         String          @map("proof_url") @db.Text
-  proofPublicId    String          @map("proof_public_id") @db.Text
-  proofProvider    StorageProvider @map("proof_provider")
-  proofMimeType    String          @map("proof_mime_type") @db.VarChar(100)
-  proofBytes       Int             @map("proof_bytes")
-  reviewedAt       DateTime?       @map("reviewed_at") @db.Timestamptz(3)
-  reviewedById     String?         @map("reviewed_by_id") @db.Uuid
-  reviewedBy       User?           @relation("PaymentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  proofUrl        String          @map("proof_url") @db.Text
+  proofPublicId   String          @map("proof_public_id") @db.Text
+  proofProvider   StorageProvider @map("proof_provider")
+  proofMimeType   String          @map("proof_mime_type") @db.VarChar(100)
+  proofBytes      Int             @map("proof_bytes")
+  reviewedAt      DateTime?       @map("reviewed_at") @db.Timestamptz(3)
+  reviewedById    String?         @map("reviewed_by_id") @db.Uuid
+  reviewedBy      User?           @relation("PaymentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   rejectionReason String?         @map("rejection_reason") @db.VarChar(500)
-  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([status, createdAt])
   @@map("registration_payments")
@@ -132,10 +132,6 @@ model Event {
   postalCode   String?     @map("postal_code") @db.VarChar(20)
   latitude     Decimal     @db.Decimal(9, 6)
   longitude    Decimal     @db.Decimal(9, 6)
-  startsAt     DateTime    @map("starts_at") @db.Timestamptz(3)
-  endsAt       DateTime    @map("ends_at") @db.Timestamptz(3)
-  entryFeePaise Int        @map("entry_fee_paise")
-  currency     String      @default("INR") @db.Char(3)
   capacity     Int?
   contactEmail String?     @map("contact_email") @db.VarChar(254)
   contactPhone String?     @map("contact_phone") @db.VarChar(20)
@@ -145,11 +141,31 @@ model Event {
   deletedAt    DateTime?   @map("deleted_at") @db.Timestamptz(3)
 
   images EventImage[]
+  slots  EventSlot[]
 
-  @@index([status, startsAt])
-  @@index([city, state, status, startsAt])
+  @@index([status, createdAt])
+  @@index([city, state, status])
   @@index([organizerId, deletedAt, createdAt])
   @@map("events")
+}
+
+model EventSlot {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventId       String    @map("event_id") @db.Uuid
+  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  title         String?   @db.VarChar(120)
+  slotDate      DateTime  @map("slot_date") @db.Date
+  startTime     DateTime  @map("start_time") @db.Timestamptz(3)
+  endTime       DateTime  @map("end_time") @db.Timestamptz(3)
+  entryFee      Int       @default(0) @map("entry_fee")
+  currency      String    @default("INR") @db.Char(3)
+  capacity      Int?
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([eventId, slotDate])
+  @@index([slotDate, startTime])
+  @@map("event_slots")
 }
 
 model EventImage {

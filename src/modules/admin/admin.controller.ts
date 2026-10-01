@@ -28,6 +28,7 @@ const detailUserSelect = {
 
 const adminEventInclude = {
   images: { orderBy: { sortOrder: "asc" as const }, select: { id: true, url: true, sortOrder: true } },
+  slots: { orderBy: [{ slotDate: "asc" as const }, { startTime: "asc" as const }] },
   organizer: { select: { id: true, name: true, email: true, phone: true, city: true, state: true, status: true } },
 };
 

@@ -48,11 +48,11 @@ export class CloudinaryStorageProvider implements IStorageProvider {
     }
 
     const folder = options?.folder || this.defaultFolder;
-    const resourceType = options?.resourceType || "auto";
 
     const uploadOptions: UploadApiOptions = {
       folder,
-      resource_type: resourceType,
+      resource_type: "image",
+      format: "jpg",
     };
 
     if (options?.publicId !== undefined) {
@@ -70,6 +70,7 @@ export class CloudinaryStorageProvider implements IStorageProvider {
         uploadOptions,
         (error, uploadResult) => {
           if (error || !uploadResult) {
+            console.error("[Cloudinary Upload Error]", error);
             return reject(error || new Error("Cloudinary upload failed: No result returned"));
           }
           resolve(uploadResult);
