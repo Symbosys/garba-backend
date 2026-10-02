@@ -47,6 +47,12 @@ enum EventStatus {
   CANCELLED
 }
 
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
 model User {
   id              String        @id @default(uuid()) @db.Uuid
   email           String        @unique @db.VarChar(254)
@@ -73,6 +79,9 @@ model User {
   registrationPayment RegistrationPayment?
   reviewedPayments    RegistrationPayment[] @relation("PaymentReviewer")
   events              Event[]
+
+  sentMessages        ChatMessage[]             @relation("SentMessages")
+  conversations       ConversationParticipant[]
 
   @@index([role, status])
   @@index([city, state, role, status])
@@ -183,3 +192,54 @@ model EventImage {
   @@unique([eventId, sortOrder])
   @@map("event_images")
 }
+
+model Conversation {
+  id              String                    @id @default(uuid()) @db.Uuid
+  lastMessageText String?                   @map("last_message_text") @db.VarChar(500)
+  lastMessageAt   DateTime?                 @map("last_message_at") @db.Timestamptz(3)
+  createdAt       DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  participants    ConversationParticipant[]
+  messages        ChatMessage[]
+
+  @@index([lastMessageAt(sort: Desc)])
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @map("conversation_id") @db.Uuid
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String       @map("user_id") @db.Uuid
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadAt     DateTime?    @map("last_read_at") @db.Timestamptz(3)
+  unreadCount    Int          @default(0) @map("unread_count")
+  isMuted        Boolean      @default(false) @map("is_muted")
+  isArchived     Boolean      @default(false) @map("is_archived")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([conversationId, userId])
+  @@index([userId, updatedAt])
+  @@map("conversation_participants")
+}
+
+model ChatMessage {
+  id             String        @id @default(uuid()) @db.Uuid
+  conversationId String        @map("conversation_id") @db.Uuid
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String        @map("sender_id") @db.Uuid
+  sender         User          @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  content        String        @db.Text
+  status         MessageStatus @default(SENT)
+  seenAt         DateTime?     @map("seen_at") @db.Timestamptz(3)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime?     @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@index([senderId, createdAt])
+  @@map("chat_messages")
+}
+

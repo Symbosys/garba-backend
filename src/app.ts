@@ -8,6 +8,7 @@ import { authRouter } from "./modules/auth/auth.routes.js";
 import { discoveryRouter } from "./modules/discovery/discovery.routes.js";
 import { eventRouter } from "./modules/events/event.routes.js";
 import { userRouter } from "./modules/user/user.routes.js";
+import { chatRouter } from "./modules/chat/chat.routes.js";
 import { ErrorResponse } from "./utils/response.util.js";
 import { statusCode } from "./types/types.js";
 
@@ -30,6 +31,7 @@ app.use("/api/v1", authRouter);
 app.use("/api/v1", discoveryRouter);
 app.use("/api/v1", eventRouter);
 app.use("/api/v1", userRouter);
+app.use("/api/v1", chatRouter);
 app.use("/api/v1/super-admin", adminRouter);
 
 app.use((_req, _res, next) => next(new ErrorResponse("Route not found", statusCode.Not_Found)));
