@@ -1,0 +1,51 @@
+name: Garba Meet Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-server:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: mintafresh/garba-meet:latest
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            echo "Pulling latest Docker image..."
+            sudo docker pull mintafresh/garba-meet:latest
+
+            echo "Navigating to garba-meet directory..."
+            cd /root/garba-meet
+
+            echo "Rebuilding and restarting services..."
+            sudo docker compose up -d 
+
+            echo "Deployment successful ✅"
+
+            echo "Cleaning up..."
+            sudo docker system prune -f
