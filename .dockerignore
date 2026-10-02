@@ -1,0 +1,15 @@
+node_modules
+generated
+.git
+.env
+.env.*
+dist
+out
+coverage
+*.log
+.DS_Store
+.idea
+.vscode
+.agents
+.claude
+.windsurf
