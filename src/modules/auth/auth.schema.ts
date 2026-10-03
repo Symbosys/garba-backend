@@ -17,3 +17,13 @@ export const loginSchema = z.object({
   email: z.email().max(254),
   password: z.string().min(1).max(72),
 }).strict();
+
+export const updateProfileSchema = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  age: z.coerce.number().int().min(14, "Age must be at least 14").max(100, "Age must be at most 100").optional(),
+  addressLine: z.string().trim().min(3).max(250).optional(),
+  city: z.string().trim().min(2).max(100).optional(),
+  state: z.string().trim().min(2).max(100).optional(),
+  gender: z.enum(["MALE", "FEMALE", "NON_BINARY", "OTHER", "PREFER_NOT_TO_SAY"]).optional(),
+}).strict();
+

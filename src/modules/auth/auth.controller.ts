@@ -8,7 +8,7 @@ import { normalizeEmail, normalizePhone } from "../../utils/normalization.util.j
 import { hashPassword, verifyPassword } from "../../utils/password.util.js";
 import { ErrorResponse, SuccessResponse } from "../../utils/response.util.js";
 import { cleanupUploads, uploadImages } from "../../utils/upload.util.js";
-import { loginSchema, registrationSchema } from "./auth.schema.js";
+import { loginSchema, registrationSchema, updateProfileSchema } from "./auth.schema.js";
 
 const safeUserSelect = { id: true, name: true, age: true, email: true, phone: true, addressLine: true, city: true, state: true, gender: true, role: true, status: true, createdAt: true, photos: { orderBy: { sortOrder: "asc" as const }, select: { id: true, url: true, sortOrder: true } } };
 
@@ -71,3 +71,51 @@ export const me = asyncHandler(async (req: Request, res: Response) => {
   if (!user) throw new ErrorResponse("User not found", statusCode.Not_Found);
   return SuccessResponse(res, "Current user", user);
 });
+
+export const updateProfile = asyncHandler(async (req: Request, res: Response) => {
+  const input = updateProfileSchema.parse(req.body);
+  const files = (req.files ?? {}) as Record<string, Express.Multer.File[]>;
+  const profilePhotos = files.profilePhotos ?? [];
+
+  const updateData = {
+    ...(input.name ? { name: input.name } : {}),
+    ...(input.age !== undefined ? { age: input.age } : {}),
+    ...(input.addressLine ? { addressLine: input.addressLine } : {}),
+    ...(input.city ? { city: input.city } : {}),
+    ...(input.state ? { state: input.state } : {}),
+    ...(input.gender ? { gender: input.gender } : {}),
+  };
+
+  const uploaded: Array<Awaited<ReturnType<typeof uploadImages>>[number]> = [];
+  try {
+    if (profilePhotos.length > 0) {
+      const photoUploads = await uploadImages(profilePhotos, "profile-photos");
+      uploaded.push(...photoUploads);
+
+      await prisma.userPhoto.deleteMany({ where: { userId: req.auth!.userId } });
+      await prisma.userPhoto.createMany({
+        data: photoUploads.map((photo, index) => ({
+          userId: req.auth!.userId,
+          url: photo.secureUrl,
+          publicId: photo.publicId,
+          provider: photo.provider,
+          mimeType: profilePhotos[index]!.mimetype,
+          bytes: photo.bytes,
+          sortOrder: index,
+        })),
+      });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.auth!.userId },
+      data: updateData,
+      select: safeUserSelect,
+    });
+
+    return SuccessResponse(res, "Profile updated successfully", updatedUser);
+  } catch (error) {
+    if (uploaded.length > 0) await cleanupUploads(uploaded);
+    throw error;
+  }
+});
+
